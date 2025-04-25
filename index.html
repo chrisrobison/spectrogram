@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Microphone & File Spectrogram</title>
+  <style>
+    :root {
+      --primary-color: #4c5fd9;
+      --dark-bg: #121212;
+      --toolbar-height: 60px;
+      --toolbar-mobile-height: 50px;
+    }
+    
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    
+    body { 
+      margin: 0; 
+      background: black; 
+      color: white; 
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+    }
+    
+    canvas { 
+      display: block; 
+      width: 100%; 
+      height: calc(100vh - var(--toolbar-height));
+      position: absolute;
+      top: var(--toolbar-height);
+      left: 0;
+    }
+    
+    #controls { 
+      padding: 0 15px; 
+      background: var(--dark-bg);
+      height: var(--toolbar-height);
+      width: 100%; 
+      z-index: 10;
+      display: flex;
+      gap: 15px;
+      align-items: center;
+      overflow-x: auto;
+      position: relative;
+    }
+    
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+    
+    .slider-group {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    
+    button {
+      background-color: var(--primary-color);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background-color 0.2s;
+    }
+    
+    button:hover {
+      background-color: #3949ab;
+    }
+    
+    .file-input-container {
+      position: relative;
+      overflow: hidden;
+      display: inline-block;
+    }
+    
+    .file-input-container input[type="file"] {
+      position: absolute;
+      left: 0;
+      top: 0;
+      opacity: 0;
+      width: 100%;
+      height: 100%;
+      cursor: pointer;
+    }
+    
+    .file-input-label {
+      background-color: #2a2a2a;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 8px 12px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+      display: inline-block;
+    }
+    
+    label {
+      font-size: 14px;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    input[type="range"] {
+      width: 120px;
+      accent-color: var(--primary-color);
+    }
+    
+    #status { 
+      margin-left: auto;
+      font-size: 14px;
+      white-space: nowrap;
+      padding-right: 10px;
+    }
+    
+    #menuToggle {
+      display: none;
+      background: none;
+      border: none;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      padding: 5px;
+      z-index: 20;
+    }
+    
+    /* Mobile styles */
+    @media (max-width: 768px) {
+      :root {
+        --toolbar-height: var(--toolbar-mobile-height);
+      }
+      
+      #controls {
+        padding: 0 10px;
+        height: var(--toolbar-mobile-height);
+        justify-content: space-between;
+      }
+      
+      #menuToggle {
+        display: block;
+      }
+      
+      .control-group, .slider-group {
+        display: none;
+        position: absolute;
+        top: var(--toolbar-mobile-height);
+        left: 0;
+        right: 0;
+        flex-direction: column;
+        background: var(--dark-bg);
+        padding: 15px;
+        gap: 15px;
+        border-top: 1px solid #333;
+        z-index: 10;
+      }
+      
+      .control-group.active, .slider-group.active {
+        display: flex;
+      }
+      
+      canvas {
+        top: var(--toolbar-mobile-height);
+        height: calc(100vh - var(--toolbar-mobile-height));
+      }
+      
+      .slider-group label {
+        width: 100%;
+        justify-content: space-between;
+      }
+      
+      input[type="range"] {
+        width: 60%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <button id="menuToggle">☰</button>
+    
+    <div class="control-group">
+      <button id="startMic">Start Mic</button>
+      <div class="file-input-container">
+        <span class="file-input-label">Audio File</span>
+        <input type="file" id="audioFile" accept="audio/*">
+      </div>
+      <div class="file-input-container">
+        <span class="file-input-label">Image File</span>
+        <input type="file" id="imageFile" accept="image/*">
+      </div>
+      <button id="pauseBtn">Pause</button>
+      <button id="clearBtn">Clear</button>
+    </div>
+    
+    <div class="slider-group">
+      <label>Hue <input type="range" id="hueMult" min="0" max="360" value="240"></label>
+      <label>Base <input type="range" id="lightBase" min="0" max="100" value="20"></label>
+      <label>Range <input type="range" id="lightRange" min="0" max="80" value="60"></label>
+    </div>
+    
+    <span id="status">Ready</span>
+  </div>
+  
+  <canvas id="spectrogram"></canvas>
+  
+  <script>
+    // Get DOM elements
+    const canvas = document.getElementById('spectrogram');
+    const ctx = canvas.getContext('2d');
+    const statusEl = document.getElementById('status');
+    
+    // Set initial canvas dimensions
+    let width, height;
+    
+    // Setup audio context and analyzer
+    let audioCtx;
+    let analyser;
+    let bufferLength;
+    let dataArray;
+    
+    let isPaused = false;
+    let currentSource = null;
+    let animationId = null;
+    
+    // Get slider elements
+    const hueMult = document.getElementById('hueMult');
+    const lightBase = document.getElementById('lightBase');
+    const lightRange = document.getElementById('lightRange');
+    
+    // Initialize audio context
+    function initAudio() {
+      if (audioCtx) return; // Already initialized
+      
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 2048;
+      bufferLength = analyser.frequencyBinCount;
+      dataArray = new Uint8Array(bufferLength);
+      
+      // Set the default parameters
+      analyser.smoothingTimeConstant = 0.8;
+      analyser.minDecibels = -90;
+      analyser.maxDecibels = -10;
+    }
+    
+    // Drawing function for the spectrogram
+    function draw() {
+      // Cancel any existing animation frame to avoid multiple draws
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
+      
+      // If paused, just keep the loop alive
+      if (isPaused) {
+        animationId = requestAnimationFrame(draw);
+        return;
+      }
+      
+      // Schedule the next frame
+      animationId = requestAnimationFrame(draw);
+      
+      // Get frequency data
+      analyser.getByteFrequencyData(dataArray);
+      
+      // Move existing spectrogram data to the left
+      const imageData = ctx.getImageData(1, 0, width - 1, height);
+      ctx.putImageData(imageData, 0, 0);
+      
+      // Draw new frequency data at the right edge
+      for (let i = 0; i < bufferLength; i++) {
+        // Get the frequency value (0-255)
+        const value = dataArray[i];
+        
+        // Skip drawing if no significant data (reduces noise in visualization)
+        if (value < 5) continue;
+        
+        // Calculate percentage (0-1) for color mapping
+        const percent = value / 255;
+        
+        // Map buffer position to y coordinate (higher frequencies at the top)
+        // We use a logarithmic scale to better represent audio frequencies
+        const logIndex = Math.log(i + 1) / Math.log(bufferLength);
+        const y = Math.floor((1 - logIndex) * height);
+        
+        // Create HSL color based on intensity and slider values
+        const color = `hsl(${percent * hueMult.value}, 100%, ${percent * lightRange.value + parseInt(lightBase.value)}%)`;
+        
+        // Draw the pixel
+        ctx.fillStyle = color;
+        ctx.fillRect(width - 1, y, 1, 1);
+      }
+    }
+    
+    // Stop any currently playing audio source
+    function stopCurrentSource() {
+      if (currentSource) {
+        try {
+          currentSource.stop();
+        } catch (e) {
+          // Source might already be stopped
+        }
+        currentSource = null;
+      }
+    }
+    
+    // Set up event listeners
+    document.getElementById('startMic').addEventListener('click', () => {
+      initAudio();
+      stopCurrentSource();
+      
+      // Make sure audio context is running
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          const source = audioCtx.createMediaStreamSource(stream);
+          source.connect(analyser);
+          statusEl.textContent = 'Listening to microphone';
+          draw();
+        })
+        .catch(err => {
+          console.error('Microphone error:', err);
+          statusEl.textContent = 'Microphone access denied';
+          alert('Microphone access denied.');
+        });
+    });
+    
+    document.getElementById('audioFile').addEventListener('change', (event) => {
+      initAudio();
+      stopCurrentSource();
+      
+      // Make sure audio context is running
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      statusEl.textContent = 'Loading audio file...';
+      
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        audioCtx.decodeAudioData(e.target.result, buffer => {
+          const source = audioCtx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(analyser);
+          currentSource = source;
+          source.start();
+          statusEl.textContent = 'Playing audio file: ' + file.name;
+          draw();
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    });
+    
+    document.getElementById('imageFile').addEventListener('change', (event) => {
+      initAudio();
+      stopCurrentSource();
+      
+      // Make sure audio context is running
+      if (audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+      
+      const file = event.target.files[0];
+      if (!file) return;
+      
+      statusEl.textContent = 'Uploading image...';
+      
+      const formData = new FormData();
+      formData.append('image', file);
+      
+      fetch('enscribe_handler.php', {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => response.json())
+      .then(data => {
+        console.log('Server response:', data);
+        
+        if (data.audioUrl) {
+          statusEl.textContent = 'Processing image to audio...';
+          
+          fetch(data.audioUrl)
+            .then(res => {
+              if (!res.ok) {
+                throw new Error(`HTTP error! Status: ${res.status}`);
+              }
+              return res.arrayBuffer();
+            })
+            .then(buffer => {
+              console.log('Audio buffer received, length:', buffer.byteLength);
+              return audioCtx.decodeAudioData(buffer);
+            })
+            .then(decoded => {
+              console.log('Audio decoded successfully');
+              const source = audioCtx.createBufferSource();
+              source.buffer = decoded;
+              source.connect(analyser);
+              currentSource = source;
+              source.start();
+              statusEl.textContent = 'Playing audio from image: ' + file.name;
+              draw();
+            })
+            .catch(err => {
+              console.error('Audio decode error:', err);
+              statusEl.textContent = 'Failed to decode audio';
+              alert('Error loading audio from image: ' + err.message);
+            });
+        } else {
+          statusEl.textContent = 'Image processing failed: ' + data.message;
+          alert('Failed to process image: ' + data.message);
+        }
+      })
+      .catch(err => {
+        console.error('Upload error:', err);
+        statusEl.textContent = 'Upload error';
+        alert('Error uploading image: ' + err.message);
+      });
+    });
+    
+    document.getElementById('pauseBtn').addEventListener('click', () => {
+      isPaused = !isPaused;
+      document.getElementById('pauseBtn').textContent = isPaused ? 'Resume' : 'Pause';
+    });
+    
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    });
+    
+    // Toggle mobile menu
+    document.getElementById('menuToggle').addEventListener('click', () => {
+      const controlGroup = document.querySelector('.control-group');
+      const sliderGroup = document.querySelector('.slider-group');
+      
+      controlGroup.classList.toggle('active');
+      sliderGroup.classList.toggle('active');
+    });
+    
+    // Handle file input changes to update UI
+    document.querySelectorAll('.file-input-container input[type="file"]').forEach(input => {
+      input.addEventListener('change', function() {
+        const label = this.previousElementSibling;
+        if (this.files.length > 0) {
+          const fileName = this.files[0].name;
+          label.textContent = fileName.length > 15 ? fileName.substring(0, 12) + '...' : fileName;
+        } else {
+          label.textContent = this.id === 'audioFile' ? 'Audio File' : 'Image File';
+        }
+      });
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      initCanvas();
+    });
+    
+    // Initialize canvas with correct size
+    function initCanvas() {
+      width = window.innerWidth;
+      height = window.innerHeight - parseInt(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-height'));
+      
+      canvas.width = width;
+      canvas.height = height;
+      
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, width, height);
+    }
+    
+    // Run initialization
+    initCanvas();
+    statusEl.textContent = 'Ready';
+    
+    // Log setup complete
+    console.log('Spectrogram initialized with dimensions:', width, 'x', height);
+  </script>
+</body>
+</html>

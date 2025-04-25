@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Microphone & File Spectrogram</title>
+  <style>
+    body { margin: 0; background: black; overflow: hidden; color: white; font-family: sans-serif; }
+    canvas { display: block; width: 100vw; height: 90vh; }
+    #controls { padding: 10px; background: #111; position: absolute; top: 0; left: 0; width: 100%; z-index: 1; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+    label { font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <button id="startMic">Start Microphone</button>
+    <input type="file" id="audioFile" accept="audio/*">
+    <input type="file" id="imageFile" accept="image/*">
+    <button id="pauseBtn">Pause</button>
+    <label>Hue Multiplier: <input type="range" id="hueMult" min="0" max="360" value="240"></label>
+    <label>Lightness Base: <input type="range" id="lightBase" min="0" max="100" value="20"></label>
+    <label>Lightness Range: <input type="range" id="lightRange" min="0" max="80" value="60"></label>
+  </div>
+  <canvas id="spectrogram"></canvas>
+  <script>
+    const canvas = document.getElementById('spectrogram');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight * 0.9;
+
+    const width = canvas.width;
+    const height = canvas.height;
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    const bufferLength = analyser.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+
+    let isPaused = false;
+
+    const hueMult = document.getElementById('hueMult');
+    const lightBase = document.getElementById('lightBase');
+    const lightRange = document.getElementById('lightRange');
+
+    function draw() {
+      if (isPaused) {
+        requestAnimationFrame(draw);
+        return;
+      }
+
+      requestAnimationFrame(draw);
+
+      analyser.getByteFrequencyData(dataArray);
+
+      const imageData = ctx.getImageData(1, 0, width - 1, height);
+      ctx.putImageData(imageData, 0, 0);
+
+      for (let i = 0; i < bufferLength; i++) {
+        const value = dataArray[i];
+        const percent = value / 255;
+        const y = Math.floor((i / bufferLength) * height);
+        const color = `hsl(${percent * hueMult.value}, 100%, ${percent * lightRange.value + parseInt(lightBase.value)}%)`;
+
+        ctx.fillStyle = color;
+        ctx.fillRect(width - 1, y, 1, 1);
+      }
+    }
+
+    document.getElementById('startMic').onclick = () => {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(stream => {
+          const source = audioCtx.createMediaStreamSource(stream);
+          source.connect(analyser);
+          draw();
+        })
+        .catch(err => {
+          console.error('Microphone error:', err);
+          alert('Microphone access denied.');
+        });
+    };
+
+    document.getElementById('audioFile').onchange = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        audioCtx.decodeAudioData(e.target.result, buffer => {
+          const source = audioCtx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(analyser);
+          source.start();
+          draw();
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    };
+
+    document.getElementById('imageFile').onchange = (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const formData = new FormData();
+      formData.append('image', file);
+
+      fetch('enscribe_handler.php', {
+        method: 'POST',
+        body: formData
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.audioUrl) {
+          fetch(data.audioUrl)
+            .then(res => res.arrayBuffer())
+            .then(buffer => audioCtx.decodeAudioData(buffer, decoded => {
+              const source = audioCtx.createBufferSource();
+              source.buffer = decoded;
+              source.connect(analyser);
+              source.start();
+              draw();
+            }));
+        } else {
+          alert('Failed to process image.');
+        }
+      })
+      .catch(err => {
+        console.error('Upload error:', err);
+        alert('Error uploading image.');
+      });
+    };
+
+    document.getElementById('pauseBtn').onclick = () => {
+      isPaused = !isPaused;
+      document.getElementById('pauseBtn').textContent = isPaused ? 'Resume' : 'Pause';
+    };
+  </script>
+</body>
+</html>

@@ -1,494 +1,284 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Microphone & File Spectrogram</title>
+  <meta charset="utf-8" />
+  <title>Enscribe: Image → Audio (with Linear Spectrogram)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    :root {
-      --primary-color: #4c5fd9;
-      --dark-bg: #121212;
-      --toolbar-height: 60px;
-      --toolbar-mobile-height: 50px;
+    :root{
+      --bg:#0f1115; --panel:#171a21; --ink:#e6e8ee; --muted:#98a2b3; --accent:#6ee7ff; --accent2:#a78bfa; --danger:#ff7b7b;
+      --radius:16px;
     }
-    
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; background:var(--bg); color:var(--ink); font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; }
+    .wrap{ max-width:1100px; margin:24px auto; padding:0 16px; }
+    header{ display:flex; gap:16px; align-items:center; margin-bottom:16px; }
+    header h1{ font-size:22px; margin:0; }
+    header .hint{ color:var(--muted); font-size:13px; }
+    .grid{ display:grid; grid-template-columns:1.1fr .9fr; gap:18px; }
+    @media (max-width: 900px){ .grid{ grid-template-columns:1fr; } }
+
+    .card{ background:linear-gradient(180deg,rgba(255,255,255,.03),rgba(255,255,255,.01)); border:1px solid rgba(255,255,255,.08);
+           border-radius:var(--radius); box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    .card h2{ font-size:16px; padding:14px 16px; margin:0; border-bottom:1px solid rgba(255,255,255,.06); color:#eaf7ff; }
+    .card .body{ padding:14px 16px; }
+
+    .drop{ border:2px dashed rgba(255,255,255,.18); border-radius:12px; padding:18px; text-align:center; cursor:pointer;
+           transition:border-color .2s, background .2s; }
+    .drop.drag{ border-color:var(--accent); background:rgba(110,231,255,.06); }
+    .drop input{ display:none; }
+    .actions{ display:flex; gap:10px; margin-top:12px; align-items:center; }
+    button{
+      appearance:none; border:0; background:linear-gradient(120deg, var(--accent), var(--accent2));
+      color:#091016; font-weight:600; padding:10px 14px; border-radius:12px; cursor:pointer;
+      box-shadow: 0 6px 18px rgba(110,231,255,.25); transition: transform .06s ease;
     }
-    
-    body { 
-      margin: 0; 
-      background: black; 
-      color: white; 
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      overflow: hidden;
-      height: 100vh;
+    button:hover{ transform: translateY(-1px); }
+    .muted{ color:var(--muted); }
+    .row{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+    .imgprev{ width:100%; border-radius:12px; background:#0b0d12; border:1px solid rgba(255,255,255,.08); display:grid; place-items:center; aspect-ratio:16/10; overflow:hidden; }
+    .imgprev img{ max-width:100%; height:auto; display:block; }
+    .audio-wrap{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+    audio{ width:100%; max-width:100%; filter: drop-shadow(0 5px 16px rgba(0,0,0,.35)); }
+    .status{ margin-top:10px; font-size:14px; }
+    .status.ok{ color:#b1f4cf; }
+    .status.err{ color:var(--danger); }
+    .small{ font-size:12px; color:var(--muted); }
+
+    canvas{ width:100%; height:420px; display:block; border-radius:12px; background:#05070c; border:1px solid rgba(255,255,255,.08); }
+    .controlbar{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin:10px 0 0; }
+    .controlbar label{ font-size:12px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+    select, input[type="range"]{
+      background:#0e1218; color:var(--ink); border:1px solid rgba(255,255,255,.12); border-radius:10px; padding:6px 8px;
     }
-    
-    canvas { 
-      display: block; 
-      width: 100%; 
-      height: calc(100vh - var(--toolbar-height));
-      position: absolute;
-      top: var(--toolbar-height);
-      left: 0;
-    }
-    
-    #controls { 
-      padding: 0 15px; 
-      background: var(--dark-bg);
-      height: var(--toolbar-height);
-      width: 100%; 
-      z-index: 10;
-      display: flex;
-      gap: 15px;
-      align-items: center;
-      overflow-x: auto;
-      position: relative;
-    }
-    
-    .control-group {
-      display: flex;
-      align-items: center;
-      gap: 15px;
-    }
-    
-    .slider-group {
-      display: flex;
-      align-items: center;
-      gap: 20px;
-    }
-    
-    button {
-      background-color: var(--primary-color);
-      color: white;
-      border: none;
-      border-radius: 4px;
-      padding: 8px 12px;
-      font-size: 14px;
-      cursor: pointer;
-      white-space: nowrap;
-      transition: background-color 0.2s;
-    }
-    
-    button:hover {
-      background-color: #3949ab;
-    }
-    
-    .file-input-container {
-      position: relative;
-      overflow: hidden;
-      display: inline-block;
-    }
-    
-    .file-input-container input[type="file"] {
-      position: absolute;
-      left: 0;
-      top: 0;
-      opacity: 0;
-      width: 100%;
-      height: 100%;
-      cursor: pointer;
-    }
-    
-    .file-input-label {
-      background-color: #2a2a2a;
-      color: white;
-      border: none;
-      border-radius: 4px;
-      padding: 8px 12px;
-      font-size: 14px;
-      cursor: pointer;
-      white-space: nowrap;
-      display: inline-block;
-    }
-    
-    label {
-      font-size: 14px;
-      white-space: nowrap;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    
-    input[type="range"] {
-      width: 120px;
-      accent-color: var(--primary-color);
-    }
-    
-    #status { 
-      margin-left: auto;
-      font-size: 14px;
-      white-space: nowrap;
-      padding-right: 10px;
-    }
-    
-    #menuToggle {
-      display: none;
-      background: none;
-      border: none;
-      color: white;
-      font-size: 24px;
-      cursor: pointer;
-      padding: 5px;
-      z-index: 20;
-    }
-    
-    /* Mobile styles */
-    @media (max-width: 768px) {
-      :root {
-        --toolbar-height: var(--toolbar-mobile-height);
-      }
-      
-      #controls {
-        padding: 0 10px;
-        height: var(--toolbar-mobile-height);
-        justify-content: space-between;
-      }
-      
-      #menuToggle {
-        display: block;
-      }
-      
-      .control-group, .slider-group {
-        display: none;
-        position: absolute;
-        top: var(--toolbar-mobile-height);
-        left: 0;
-        right: 0;
-        flex-direction: column;
-        background: var(--dark-bg);
-        padding: 15px;
-        gap: 15px;
-        border-top: 1px solid #333;
-        z-index: 10;
-      }
-      
-      .control-group.active, .slider-group.active {
-        display: flex;
-      }
-      
-      canvas {
-        top: var(--toolbar-mobile-height);
-        height: calc(100vh - var(--toolbar-mobile-height));
-      }
-      
-      .slider-group label {
-        width: 100%;
-        justify-content: space-between;
-      }
-      
-      input[type="range"] {
-        width: 60%;
-      }
-    }
+    .legend{ display:flex; gap:10px; align-items:center; margin-top:6px; }
+    .swatch{ width:18px; height:12px; background: linear-gradient(90deg, #000, #fff); border-radius:4px; border:1px solid rgba(255,255,255,.12); }
   </style>
 </head>
 <body>
-  <div id="controls">
-    <button id="menuToggle">☰</button>
-    
-    <div class="control-group">
-      <button id="startMic">Start Mic</button>
-      <div class="file-input-container">
-        <span class="file-input-label">Audio File</span>
-        <input type="file" id="audioFile" accept="audio/*">
-      </div>
-      <div class="file-input-container">
-        <span class="file-input-label">Image File</span>
-        <input type="file" id="imageFile" accept="image/*">
-      </div>
-      <button id="pauseBtn">Pause</button>
-      <button id="clearBtn">Clear</button>
+  <div class="wrap">
+    <header>
+      <h1>Enscribe</h1>
+      <div class="hint">Upload an image → server returns a WAV → we play it and draw a linear-frequency spectrogram.</div>
+    </header>
+
+    <div class="grid">
+      <!-- LEFT: Controls + Preview -->
+      <section class="card">
+        <h2>1) Upload & Generate Audio</h2>
+        <div class="body">
+          <form id="enscribe-form" action="enscribe.php" method="post" enctype="multipart/form-data">
+            <label class="drop" id="drop">
+              <input id="file" type="file" name="image" accept="image/png, image/jpeg, image/gif" />
+              <div>
+                <div style="font-weight:600; margin-bottom:6px;">Drop an image here, or click to choose</div>
+                <div class="muted">JPG / PNG / GIF • ≤ 10 MB</div>
+              </div>
+            </label>
+
+            <div class="actions">
+              <button id="btn-generate" type="submit">Generate Audio</button>
+              <span class="muted small">Server rotates 90° clockwise before enscribe.</span>
+            </div>
+          </form>
+
+          <div class="row" style="margin-top:14px;">
+            <div class="imgprev" id="imgprev"><span class="muted">Image preview</span></div>
+          </div>
+
+          <div class="status" id="status"></div>
+        </div>
+      </section>
+
+      <!-- RIGHT: Audio + Spectrogram -->
+      <section class="card">
+        <h2>2) Listen & View Spectrogram (Linear Frequency)</h2>
+        <div class="body">
+          <div class="audio-wrap">
+            <audio id="player" controls preload="none"></audio>
+          </div>
+
+          <div class="controlbar">
+            <label>FFT size
+              <select id="fft">
+                <option value="1024">1024</option>
+                <option value="2048" selected>2048</option>
+                <option value="4096">4096</option>
+                <option value="8192">8192</option>
+              </select>
+            </label>
+            <label>Smoothing
+              <input id="smooth" type="range" min="0" max="0.95" step="0.05" value="0" />
+            </label>
+            <label>Scroll speed (px/frame)
+              <input id="speed" type="range" min="1" max="4" step="1" value="1" />
+            </label>
+            <div class="legend"><div class="swatch"></div><span class="small">Grayscale magnitude</span></div>
+          </div>
+
+          <div style="margin-top:10px;">
+            <canvas id="spec" width="1024" height="512" aria-label="Spectrogram"></canvas>
+          </div>
+        </div>
+      </section>
     </div>
-    
-    <div class="slider-group">
-      <label>Hue <input type="range" id="hueMult" min="0" max="360" value="240"></label>
-      <label>Base <input type="range" id="lightBase" min="0" max="100" value="20"></label>
-      <label>Range <input type="range" id="lightRange" min="0" max="80" value="60"></label>
-    </div>
-    
-    <span id="status">Ready</span>
   </div>
-  
-  <canvas id="spectrogram"></canvas>
-  
+
   <script>
-    // Get DOM elements
-    const canvas = document.getElementById('spectrogram');
-    const ctx = canvas.getContext('2d');
-    const statusEl = document.getElementById('status');
-    
-    // Set initial canvas dimensions
-    let width, height;
-    
-    // Setup audio context and analyzer
-    let audioCtx;
-    let analyser;
-    let bufferLength;
-    let dataArray;
-    
-    let isPaused = false;
-    let currentSource = null;
-    let animationId = null;
-    
-    // Get slider elements
-    const hueMult = document.getElementById('hueMult');
-    const lightBase = document.getElementById('lightBase');
-    const lightRange = document.getElementById('lightRange');
-    
-    // Initialize audio context
-    function initAudio() {
-      if (audioCtx) return; // Already initialized
-      
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      analyser = audioCtx.createAnalyser();
-      analyser.fftSize = 2048;
-      bufferLength = analyser.frequencyBinCount;
-      dataArray = new Uint8Array(bufferLength);
-      
-      // Set the default parameters
-      analyser.smoothingTimeConstant = 0.8;
-      analyser.minDecibels = -90;
-      analyser.maxDecibels = -10;
-    }
-    
-    // Drawing function for the spectrogram
-    function draw() {
-      // Cancel any existing animation frame to avoid multiple draws
-      if (animationId) {
-        cancelAnimationFrame(animationId);
+    (() => {
+      const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+      const $ = (s, p=document) => p.querySelector(s);
+
+      const form = $('#enscribe-form');
+      const fileInput = $('#file');
+      const drop = $('#drop');
+      const imgPrev = $('#imgprev');
+      const statusEl = $('#status');
+      const audioEl = $('#player');
+      const canvas = $('#spec');
+      const fftSel = $('#fft');
+      const smoothRange = $('#smooth');
+      const speedRange = $('#speed');
+
+      // --- Audio graph (audible + analysable)
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = parseInt(fftSel.value, 10);
+      analyser.smoothingTimeConstant = parseFloat(smoothRange.value);
+
+      const gain = audioCtx.createGain();
+      gain.gain.value = 1;
+
+      // Create MediaElement source ONCE and feed analyser + destination
+      const mediaSrc = audioCtx.createMediaElementSource(audioEl);
+      mediaSrc.connect(analyser);
+      analyser.connect(gain);
+      gain.connect(audioCtx.destination);
+
+      // --- Spectrogram (linear frequency)
+      const ctx = canvas.getContext('2d');
+      function resizeCanvas() {
+        const cssW = canvas.clientWidth || 1024;
+        const cssH = canvas.clientHeight || 420;
+        canvas.width  = Math.floor(cssW * dpr);
+        canvas.height = Math.floor(cssH * dpr);
+        ctx.setTransform(1,0,0,1,0,0); // reset transform
+        ctx.imageSmoothingEnabled = false;
       }
-      
-      // If paused, just keep the loop alive
-      if (isPaused) {
-        animationId = requestAnimationFrame(draw);
-        return;
+      resizeCanvas();
+      window.addEventListener('resize', resizeCanvas);
+
+      let pxSpeed = parseInt(speedRange.value, 10);
+      let bins = analyser.frequencyBinCount;
+      let freq = new Uint8Array(bins);
+
+      function drawSpectrogram() {
+        // read FFT magnitudes
+        if (analyser.fftSize !== parseInt(fftSel.value, 10)) {
+          analyser.fftSize = parseInt(fftSel.value, 10);
+          bins = analyser.frequencyBinCount;
+          freq = new Uint8Array(bins);
+        }
+        analyser.smoothingTimeConstant = parseFloat(smoothRange.value);
+        pxSpeed = parseInt(speedRange.value, 10);
+
+        analyser.getByteFrequencyData(freq);
+
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // Shift image left by pxSpeed
+        if (w > pxSpeed) {
+          const img = ctx.getImageData(pxSpeed, 0, w - pxSpeed, h);
+          ctx.putImageData(img, 0, 0);
+        }
+        // Fill rightmost pxSpeed columns
+        for (let x = 0; x < pxSpeed; x++) {
+          for (let y = 0; y < h; y++) {
+            const bin = Math.min(bins - 1, Math.floor((y / h) * bins)); // LINEAR frequency mapping
+            const v = freq[bin]; // 0..255
+            ctx.fillStyle = `rgb(${v},${v},${v})`;
+            ctx.fillRect(w - 1 - x, h - 1 - y, 1, 1);
+          }
+        }
+        requestAnimationFrame(drawSpectrogram);
       }
-      
-      // Schedule the next frame
-      animationId = requestAnimationFrame(draw);
-      
-      // Get frequency data
-      analyser.getByteFrequencyData(dataArray);
-      
-      // Move existing spectrogram data to the left
-      const imageData = ctx.getImageData(1, 0, width - 1, height);
-      ctx.putImageData(imageData, 0, 0);
-      
-      // Draw new frequency data at the right edge
-      for (let i = 0; i < bufferLength; i++) {
-        // Get the frequency value (0-255)
-        const value = dataArray[i];
-        
-        // Skip drawing if no significant data (reduces noise in visualization)
-        if (value < 5) continue;
-        
-        // Calculate percentage (0-1) for color mapping
-        const percent = value / 255;
-        
-        // Map buffer position to y coordinate (higher frequencies at the top)
-        // We use a logarithmic scale to better represent audio frequencies
-        const logIndex = Math.log(i + 1) / Math.log(bufferLength);
-        const y = Math.floor((1 - logIndex) * height);
-        
-        // Create HSL color based on intensity and slider values
-        const color = `hsl(${percent * hueMult.value}, 100%, ${percent * lightRange.value + parseInt(lightBase.value)}%)`;
-        
-        // Draw the pixel
-        ctx.fillStyle = color;
-        ctx.fillRect(width - 1, y, 1, 1);
+      requestAnimationFrame(drawSpectrogram);
+
+      // --- Image preview
+      function setPreview(file) {
+        if (!file) { imgPrev.innerHTML = '<span class="muted">Image preview</span>'; return; }
+        const url = URL.createObjectURL(file);
+        imgPrev.innerHTML = '';
+        const img = new Image();
+        img.onload = () => URL.revokeObjectURL(url);
+        img.src = url;
+        imgPrev.appendChild(img);
       }
-    }
-    
-    // Stop any currently playing audio source
-    function stopCurrentSource() {
-      if (currentSource) {
+
+      // --- Drag & drop
+      ['dragenter','dragover'].forEach(ev => drop.addEventListener(ev, e => {
+        e.preventDefault(); e.stopPropagation(); drop.classList.add('drag');
+      }));
+      ['dragleave','drop'].forEach(ev => drop.addEventListener(ev, e => {
+        e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag');
+      }));
+      drop.addEventListener('drop', (e) => {
+        const f = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (f) { fileInput.files = e.dataTransfer.files; setPreview(f); }
+      });
+      drop.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', () => setPreview(fileInput.files[0]));
+
+      function setStatus(msg, ok=false){
+        statusEl.textContent = msg || '';
+        statusEl.className = 'status ' + (ok ? 'ok' : (msg ? 'err' : ''));
+      }
+
+      // --- Form submit → PHP → play
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const f = fileInput.files[0];
+        if (!f) { setStatus('Please choose an image first.'); return; }
+
         try {
-          currentSource.stop();
-        } catch (e) {
-          // Source might already be stopped
+          setStatus('Uploading & generating…');
+          if (audioCtx.state !== 'running') await audioCtx.resume();
+
+          const fd = new FormData(form);
+          const res = await fetch(form.action || 'enscribe.php', { method:'POST', body: fd });
+          const json = await res.json();
+
+          if (!json.success) {
+            setStatus(json.message || 'Server error'); return;
+          }
+
+          // Use returned URL (already with cache-buster); make absolute against current page
+          const absUrl = new URL(json.audioUrl, location.href).toString();
+
+          // Load into <audio> element so we get UI controls
+          audioEl.src = absUrl;
+          await audioEl.load();
+
+          // Try to play (will work since this is inside a click/submit gesture)
+          await audioEl.play();
+
+          setStatus('Done. Playing.', true);
+        } catch (err) {
+          console.error(err);
+          setStatus('Failed: ' + (err?.message || err));
         }
-        currentSource = null;
-      }
-    }
-    
-    // Set up event listeners
-    document.getElementById('startMic').addEventListener('click', () => {
-      initAudio();
-      stopCurrentSource();
-      
-      // Make sure audio context is running
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-      
-      navigator.mediaDevices.getUserMedia({ audio: true })
-        .then(stream => {
-          const source = audioCtx.createMediaStreamSource(stream);
-          source.connect(analyser);
-          statusEl.textContent = 'Listening to microphone';
-          draw();
-        })
-        .catch(err => {
-          console.error('Microphone error:', err);
-          statusEl.textContent = 'Microphone access denied';
-          alert('Microphone access denied.');
-        });
-    });
-    
-    document.getElementById('audioFile').addEventListener('change', (event) => {
-      initAudio();
-      stopCurrentSource();
-      
-      // Make sure audio context is running
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-      
-      const file = event.target.files[0];
-      if (!file) return;
-      
-      statusEl.textContent = 'Loading audio file...';
-      
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        audioCtx.decodeAudioData(e.target.result, buffer => {
-          const source = audioCtx.createBufferSource();
-          source.buffer = buffer;
-          source.connect(analyser);
-          currentSource = source;
-          source.start();
-          statusEl.textContent = 'Playing audio file: ' + file.name;
-          draw();
-        });
+      });
+
+      // Autoplay policy: resume on first user interaction anywhere
+      const resumeOnce = async () => {
+        try { if (audioCtx.state !== 'running') await audioCtx.resume(); }
+        catch(_){} finally {
+          window.removeEventListener('pointerdown', resumeOnce, {once:true});
+        }
       };
-      reader.readAsArrayBuffer(file);
-    });
-    
-    document.getElementById('imageFile').addEventListener('change', (event) => {
-      initAudio();
-      stopCurrentSource();
-      
-      // Make sure audio context is running
-      if (audioCtx.state === 'suspended') {
-        audioCtx.resume();
-      }
-      
-      const file = event.target.files[0];
-      if (!file) return;
-      
-      statusEl.textContent = 'Uploading image...';
-      
-      const formData = new FormData();
-      formData.append('image', file);
-      
-      fetch('enscribe_handler.php', {
-        method: 'POST',
-        body: formData
-      })
-      .then(response => response.json())
-      .then(data => {
-        console.log('Server response:', data);
-        
-        if (data.audioUrl) {
-          statusEl.textContent = 'Processing image to audio...';
-          
-          fetch(data.audioUrl)
-            .then(res => {
-              if (!res.ok) {
-                throw new Error(`HTTP error! Status: ${res.status}`);
-              }
-              return res.arrayBuffer();
-            })
-            .then(buffer => {
-              console.log('Audio buffer received, length:', buffer.byteLength);
-              return audioCtx.decodeAudioData(buffer);
-            })
-            .then(decoded => {
-              console.log('Audio decoded successfully');
-              const source = audioCtx.createBufferSource();
-              source.buffer = decoded;
-              source.connect(analyser);
-              currentSource = source;
-              source.start();
-              statusEl.textContent = 'Playing audio from image: ' + file.name;
-              draw();
-            })
-            .catch(err => {
-              console.error('Audio decode error:', err);
-              statusEl.textContent = 'Failed to decode audio';
-              alert('Error loading audio from image: ' + err.message);
-            });
-        } else {
-          statusEl.textContent = 'Image processing failed: ' + data.message;
-          alert('Failed to process image: ' + data.message);
-        }
-      })
-      .catch(err => {
-        console.error('Upload error:', err);
-        statusEl.textContent = 'Upload error';
-        alert('Error uploading image: ' + err.message);
-      });
-    });
-    
-    document.getElementById('pauseBtn').addEventListener('click', () => {
-      isPaused = !isPaused;
-      document.getElementById('pauseBtn').textContent = isPaused ? 'Resume' : 'Pause';
-    });
-    
-    document.getElementById('clearBtn').addEventListener('click', () => {
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    });
-    
-    // Toggle mobile menu
-    document.getElementById('menuToggle').addEventListener('click', () => {
-      const controlGroup = document.querySelector('.control-group');
-      const sliderGroup = document.querySelector('.slider-group');
-      
-      controlGroup.classList.toggle('active');
-      sliderGroup.classList.toggle('active');
-    });
-    
-    // Handle file input changes to update UI
-    document.querySelectorAll('.file-input-container input[type="file"]').forEach(input => {
-      input.addEventListener('change', function() {
-        const label = this.previousElementSibling;
-        if (this.files.length > 0) {
-          const fileName = this.files[0].name;
-          label.textContent = fileName.length > 15 ? fileName.substring(0, 12) + '...' : fileName;
-        } else {
-          label.textContent = this.id === 'audioFile' ? 'Audio File' : 'Image File';
-        }
-      });
-    });
-    
-    // Handle window resize
-    window.addEventListener('resize', () => {
-      initCanvas();
-    });
-    
-    // Initialize canvas with correct size
-    function initCanvas() {
-      width = window.innerWidth;
-      height = window.innerHeight - parseInt(getComputedStyle(document.documentElement).getPropertyValue('--toolbar-height'));
-      
-      canvas.width = width;
-      canvas.height = height;
-      
-      ctx.fillStyle = 'black';
-      ctx.fillRect(0, 0, width, height);
-    }
-    
-    // Run initialization
-    initCanvas();
-    statusEl.textContent = 'Ready';
-    
-    // Log setup complete
-    console.log('Spectrogram initialized with dimensions:', width, 'x', height);
+      window.addEventListener('pointerdown', resumeOnce, {once:true});
+    })();
   </script>
 </body>
 </html>
